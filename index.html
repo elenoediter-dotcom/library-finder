@@ -465,9 +465,19 @@
       <div class="section">
         <div class="section-title">🏛️ 近くの図書館</div>
         <div id="library-status"></div>
+        <div class="lib-filter-wrap" id="lib-filter-wrap" style="display:none; margin-bottom:8px;">
+          <input
+            class="search-input"
+            id="lib-filter"
+            type="text"
+            placeholder="図書館名で絞り込み..."
+            oninput="filterLibraries(this.value)"
+          />
+        </div>
         <div class="library-list" id="library-list">
           <div class="empty-msg">現在地を取得すると図書館が表示されます</div>
         </div>
+        <div id="lib-filter-empty" class="empty-msg" style="display:none;">該当する図書館がありません</div>
       </div>
 
       <!-- 本の検索 -->
@@ -684,6 +694,10 @@ function fetchLibraries(lat, lng) {
 
     renderLibraries();
     renderLibraryMarkers();
+    // 絞り込み欄を表示・リセット
+    document.getElementById('lib-filter-wrap').style.display = 'block';
+    document.getElementById('lib-filter').value = '';
+    document.getElementById('lib-filter-empty').style.display = 'none';
   });
 }
 
@@ -755,6 +769,27 @@ function renderLibraryMarkers() {
     marker.on('click', () => focusLibrary(i));
     currentMarkers.push(marker);
   });
+}
+
+// ========================
+// 図書館リスト絞り込み
+// ========================
+function filterLibraries(query) {
+  const q = query.trim().toLowerCase();
+  let visibleCount = 0;
+
+  libraries.forEach((lib, i) => {
+    const card = document.getElementById(`lib-item-${i}`);
+    if (!card) return;
+    const name = (lib.formal || lib.short || '').toLowerCase();
+    const addr = (lib.address || '').toLowerCase();
+    const match = !q || name.includes(q) || addr.includes(q);
+    card.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+
+  const emptyEl = document.getElementById('lib-filter-empty');
+  if (emptyEl) emptyEl.style.display = visibleCount === 0 && q ? 'block' : 'none';
 }
 
 // ========================
