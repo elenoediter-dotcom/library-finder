@@ -711,7 +711,7 @@ function fetchBooksFromGoogle(title) {
   const statusEl = document.getElementById('book-search-status');
   const candidatesEl = document.getElementById('book-candidates');
 
-  const url = `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title)}&langRestrict=ja&maxResults=10&printType=books`;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title)}&maxResults=20&printType=books`;
 
   fetch(url)
     .then(r => r.json())
@@ -721,7 +721,7 @@ function fetchBooksFromGoogle(title) {
       const books = items.map(extractBookInfo).filter(b => b && b.isbn13);
 
       if (books.length === 0) {
-        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした（ISBNが取得できませんでした）</div>';
+        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした。別のキーワードやISBNで検索してみてください</div>';
         return;
       }
 
