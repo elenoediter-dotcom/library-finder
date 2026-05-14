@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>近くの図書館を探す</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -324,6 +325,62 @@
 
     .candidate-title { font-weight: 600; color: #222; }
     .candidate-meta { font-size: 0.72rem; color: #888; margin-top: 2px; }
+
+    /* ===== 経路ボタン ===== */
+    .btn-route {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      padding: 4px 10px;
+      font-size: 0.73rem;
+      font-weight: 600;
+      border: 1px solid #1565c0;
+      border-radius: 12px;
+      background: #e3f2fd;
+      color: #1565c0;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-route:hover { background: #1565c0; color: white; }
+    .btn-route.active { background: #1565c0; color: white; }
+
+    /* ===== 経路情報パネル ===== */
+    .route-info {
+      background: #e3f2fd;
+      border: 1px solid #90caf9;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 0.82rem;
+      color: #1565c0;
+    }
+    .route-info .route-stats {
+      display: flex;
+      gap: 16px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+    }
+    .route-steps {
+      margin-top: 6px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      color: #333;
+    }
+    .route-step {
+      padding: 3px 0;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .route-step:last-child { border-bottom: none; }
+    .step-icon { flex-shrink: 0; opacity: 0.7; }
+
+    /* Leaflet Routing Machine のデフォルトUIを非表示 */
+    .leaflet-routing-container { display: none !important; }
   </style>
 </head>
 <body>
@@ -401,6 +458,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <script>
 // ========================
 // 定数
@@ -609,10 +667,20 @@ function renderLibraries() {
     const item = document.createElement('div');
     item.className = 'library-item';
     item.id = `lib-item-${i}`;
+
+    const hasGeocode = !!lib.geocode;
+    const routeBtnHtml = hasGeocode
+      ? `<button class="btn-route" id="route-btn-${i}" onclick="event.stopPropagation(); toggleRoute(${i})">🗺 経路を表示</button>`
+      : '';
+
     item.innerHTML = `
       <div class="library-name">${escHtml(lib.formal || lib.short || '不明')}</div>
       <div class="library-address">${escHtml(lib.address || '')}</div>
-      <span class="library-category">${CATEGORY_LABEL[lib.category] || lib.category || ''}</span>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="library-category">${CATEGORY_LABEL[lib.category] || lib.category || ''}</span>
+        ${routeBtnHtml}
+      </div>
+      <div class="route-info" id="route-info-${i}" style="display:none;"></div>
     `;
     item.onclick = () => focusLibrary(i);
     listEl.appendChild(item);
@@ -670,6 +738,124 @@ function focusLibrary(i) {
       if (currentMarkers[i]) currentMarkers[i].openPopup();
     }
   }
+}
+
+// ========================
+// 経路表示
+// ========================
+let routingControl = null;
+let activeRouteIndex = null;
+
+function toggleRoute(i) {
+  // 同じボタンを再クリック → 経路を消す
+  if (activeRouteIndex === i) {
+    clearRoute();
+    return;
+  }
+
+  if (!currentLat || !currentLng) {
+    alert('先に現在地を取得してください');
+    return;
+  }
+
+  const lib = libraries[i];
+  if (!lib || !lib.geocode) return;
+
+  const [lngStr, latStr] = lib.geocode.split(',');
+  const destLat = parseFloat(latStr);
+  const destLng = parseFloat(lngStr);
+  if (isNaN(destLat) || isNaN(destLng)) return;
+
+  // 前の経路を消す
+  clearRoute(false);
+
+  // ボタンをアクティブに
+  activeRouteIndex = i;
+  const btn = document.getElementById(`route-btn-${i}`);
+  if (btn) { btn.textContent = '✕ 経路を消す'; btn.classList.add('active'); }
+
+  // 地図をフィット
+  focusLibrary(i);
+
+  // Leaflet Routing Machine でルート描画
+  routingControl = L.Routing.control({
+    waypoints: [
+      L.latLng(currentLat, currentLng),
+      L.latLng(destLat, destLng)
+    ],
+    router: L.Routing.osrmv1({
+      serviceUrl: 'https://router.project-osrm.org/route/v1',
+      profile: 'foot'  // 徒歩
+    }),
+    lineOptions: {
+      styles: [{ color: '#1565c0', weight: 5, opacity: 0.8 }]
+    },
+    createMarker: () => null,  // 既存マーカーを使うので新規作成しない
+    addWaypoints: false,
+    draggableWaypoints: false,
+    fitSelectedRoutes: true,
+    show: false
+  }).addTo(map);
+
+  // ルート計算完了時に情報を表示
+  routingControl.on('routesfound', (e) => {
+    const route = e.routes[0];
+    const distKm = (route.summary.totalDistance / 1000).toFixed(1);
+    const mins = Math.round(route.summary.totalTime / 60);
+    const infoEl = document.getElementById(`route-info-${i}`);
+    if (!infoEl) return;
+
+    // ターンバイターン案内
+    const steps = route.instructions || [];
+    const stepsHtml = steps.slice(0, 15).map(s => {
+      const icon = getTurnIcon(s.type);
+      const distStr = s.distance > 0 ? ` (${s.distance < 1000 ? s.distance + 'm' : (s.distance/1000).toFixed(1) + 'km'})` : '';
+      return `<div class="route-step"><span class="step-icon">${icon}</span><span>${escHtml(s.text)}${distStr}</span></div>`;
+    }).join('');
+
+    infoEl.style.display = 'block';
+    infoEl.innerHTML = `
+      <div class="route-stats">
+        <span>🚶 徒歩 約${mins}分</span>
+        <span>📏 ${distKm} km</span>
+      </div>
+      <div class="route-steps">${stepsHtml}</div>
+    `;
+    infoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  routingControl.on('routingerror', () => {
+    const infoEl = document.getElementById(`route-info-${i}`);
+    if (infoEl) {
+      infoEl.style.display = 'block';
+      infoEl.innerHTML = '<span style="color:#c62828">経路の取得に失敗しました</span>';
+    }
+  });
+}
+
+function clearRoute(resetButton = true) {
+  if (routingControl) {
+    map.removeControl(routingControl);
+    routingControl = null;
+  }
+  if (resetButton && activeRouteIndex !== null) {
+    const btn = document.getElementById(`route-btn-${activeRouteIndex}`);
+    if (btn) { btn.textContent = '🗺 経路を表示'; btn.classList.remove('active'); }
+    const infoEl = document.getElementById(`route-info-${activeRouteIndex}`);
+    if (infoEl) infoEl.style.display = 'none';
+  }
+  activeRouteIndex = null;
+}
+
+function getTurnIcon(type) {
+  const icons = {
+    'Head': '⬆', 'WaypointReached': '📍', 'Roundabout': '🔄',
+    'SlightRight': '↗', 'Right': '➡', 'SharpRight': '↪',
+    'SlightLeft': '↖', 'Left': '⬅', 'SharpLeft': '↩',
+    'Straight': '⬆', 'DestinationReached': '🏛',
+    'EnterRoundAbout': '🔄', 'LeaveRoundAbout': '↗'
+  };
+  return icons[type] || '•';
 }
 
 // ========================
