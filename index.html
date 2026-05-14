@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>近くの図書館を探す</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+      background: #f5f5f0;
+      color: #333;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #2c5f2e;
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    header .subtitle {
+      font-size: 0.8rem;
+      opacity: 0.8;
+    }
+
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ===== 左サイドパネル ===== */
+    .sidebar {
+      width: 380px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: white;
+      border-right: 1px solid #ddd;
+      overflow: hidden;
+    }
+
+    .sidebar-inner {
+      overflow-y: auto;
+      flex: 1;
+      padding: 16px;
+    }
+
+    /* ===== セクション共通 ===== */
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #2c5f2e;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid #2c5f2e;
+    }
+
+    /* ===== ボタン ===== */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: #2c5f2e;
+      color: white;
+    }
+
+    .btn-primary:hover { background: #1e4220; }
+    .btn-primary:disabled { background: #999; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: #e8f5e9;
+      color: #2c5f2e;
+      border: 1px solid #a5d6a7;
+    }
+
+    .btn-secondary:hover { background: #c8e6c9; }
+
+    /* ===== 現在地セクション ===== */
+    .location-section {
+      background: #f1f8e9;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .location-info {
+      font-size: 0.8rem;
+      color: #555;
+      margin-top: 6px;
+    }
+
+    /* ===== 図書館リスト ===== */
+    .library-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .library-item {
+      background: #fafafa;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .library-item:hover, .library-item.active {
+      border-color: #2c5f2e;
+      background: #f1f8e9;
+    }
+
+    .library-item.active {
+      box-shadow: 0 0 0 2px #a5d6a7;
+    }
+
+    .library-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #1a1a1a;
+    }
+
+    .library-address {
+      font-size: 0.75rem;
+      color: #777;
+      margin-top: 2px;
+    }
+
+    .library-category {
+      display: inline-block;
+      font-size: 0.68rem;
+      background: #e8f5e9;
+      color: #2c5f2e;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    /* ===== 本の検索フォーム ===== */
+    .search-form {
+      display: flex;
+      gap: 6px;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-input:focus {
+      border-color: #2c5f2e;
+      box-shadow: 0 0 0 2px rgba(44,95,46,0.15);
+    }
+
+    /* ===== 蔵書結果 ===== */
+    .book-result {
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+
+    .book-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #1a1a1a;
+    }
+
+    .book-author {
+      font-size: 0.78rem;
+      color: #777;
+      margin-top: 2px;
+    }
+
+    .book-isbn {
+      font-size: 0.72rem;
+      color: #999;
+      font-family: monospace;
+      margin-top: 2px;
+    }
+
+    .availability-list {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .availability-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 8px;
+      background: white;
+      border-radius: 5px;
+      border: 1px solid #eee;
+      font-size: 0.78rem;
+    }
+
+    .avail-library { color: #444; font-weight: 500; }
+
+    .avail-status {
+      font-weight: 700;
+      font-size: 0.72rem;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+
+    .status-ok { background: #e8f5e9; color: #1b5e20; }
+    .status-out { background: #fff3e0; color: #e65100; }
+    .status-none { background: #f5f5f5; color: #999; }
+    .status-other { background: #e3f2fd; color: #0d47a1; }
+
+    /* ===== ステータスメッセージ ===== */
+    .status-msg {
+      font-size: 0.8rem;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+    }
+
+    .status-msg.info { background: #e3f2fd; color: #1565c0; }
+    .status-msg.error { background: #ffebee; color: #c62828; }
+    .status-msg.loading {
+      background: #f5f5f5;
+      color: #555;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #ccc;
+      border-top-color: #555;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ===== 地図 ===== */
+    #map {
+      flex: 1;
+      z-index: 0;
+    }
+
+    /* ===== レスポンシブ ===== */
+    @media (max-width: 700px) {
+      .main { flex-direction: column; }
+      .sidebar { width: 100%; height: 50vh; }
+      #map { height: 50vh; }
+    }
+
+    /* ===== スクロールバー ===== */
+    .sidebar-inner::-webkit-scrollbar { width: 5px; }
+    .sidebar-inner::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+
+    .empty-msg {
+      font-size: 0.82rem;
+      color: #aaa;
+      text-align: center;
+      padding: 16px 0;
+    }
+
+    /* ===== 本の候補リスト ===== */
+    .book-candidates {
+      margin-top: 6px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .book-candidate-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      border-bottom: 1px solid #f0f0f0;
+      transition: background 0.1s;
+    }
+
+    .book-candidate-item:last-child { border-bottom: none; }
+    .book-candidate-item:hover { background: #f1f8e9; }
+
+    .candidate-title { font-weight: 600; color: #222; }
+    .candidate-meta { font-size: 0.72rem; color: #888; margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:1.5rem;">📚</span>
+  <div>
+    <h1>近くの図書館を探す</h1>
+    <div class="subtitle">CALIL 図書館APIを使用</div>
+  </div>
+</header>
+
+<div class="main">
+  <!-- ===== 左サイドバー ===== -->
+  <div class="sidebar">
+    <div class="sidebar-inner">
+
+      <!-- 現在地 -->
+      <div class="section">
+        <div class="section-title">📍 場所を設定</div>
+        <div class="location-section">
+          <button class="btn btn-primary" id="btn-locate" onclick="locateMe()">
+            <span>現在地を取得</span>
+          </button>
+          <div class="location-info" id="location-info">ボタンを押して現在地から図書館を検索</div>
+        </div>
+        <div id="manual-input" style="display:none; margin-top:10px;">
+          <div style="font-size:0.78rem; color:#555; margin-bottom:6px;">📝 場所を手動で入力</div>
+          <div class="search-form">
+            <input
+              class="search-input"
+              id="address-input"
+              type="text"
+              placeholder="例：東京都渋谷区、大阪市北区"
+              onkeydown="if(event.key==='Enter') searchByAddress()"
+            />
+            <button class="btn btn-secondary" onclick="searchByAddress()">検索</button>
+          </div>
+          <div id="address-status"></div>
+        </div>
+      </div>
+
+      <!-- 図書館リスト -->
+      <div class="section">
+        <div class="section-title">🏛️ 近くの図書館</div>
+        <div id="library-status"></div>
+        <div class="library-list" id="library-list">
+          <div class="empty-msg">現在地を取得すると図書館が表示されます</div>
+        </div>
+      </div>
+
+      <!-- 本の検索 -->
+      <div class="section">
+        <div class="section-title">🔍 本を検索</div>
+        <div class="search-form">
+          <input
+            class="search-input"
+            id="book-query"
+            type="text"
+            placeholder="タイトルまたはISBNを入力"
+            onkeydown="if(event.key==='Enter') searchBook()"
+          />
+          <button class="btn btn-primary" onclick="searchBook()">検索</button>
+        </div>
+        <div id="book-search-status"></div>
+        <div id="book-candidates"></div>
+        <div id="book-result"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== 地図 ===== -->
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ========================
+// 定数
+// ========================
+const APPKEY = '0b57cf989b454a207c1ca8793f1b74db';
+
+// ========================
+// 状態管理
+// ========================
+let map = null;
+let currentLat = null;
+let currentLng = null;
+let libraries = [];
+let selectedLibraries = [];
+let currentMarkers = [];
+let userMarker = null;
+let pollTimer = null;
+let jsonpCounter = 0;
+
+// ========================
+// 地図の初期化
+// ========================
+function initMap(lat, lng) {
+  if (!map) {
+    map = L.map('map').setView([lat, lng], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(map);
+  } else {
+    map.setView([lat, lng], 13);
+  }
+}
+
+// ========================
+// 現在地取得
+// ========================
+function locateMe() {
+  const btn = document.getElementById('btn-locate');
+  const info = document.getElementById('location-info');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 取得中...';
+  info.textContent = '';
+
+  if (!navigator.geolocation) {
+    showLocationError('このブラウザでは位置情報が使えません');
+    btn.disabled = false;
+    btn.innerHTML = '<span>現在地を取得</span>';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      currentLat = pos.coords.latitude;
+      currentLng = pos.coords.longitude;
+      info.textContent = `📍 緯度 ${currentLat.toFixed(5)}、経度 ${currentLng.toFixed(5)}`;
+      btn.disabled = false;
+      btn.innerHTML = '<span>現在地を更新</span>';
+      initMap(currentLat, currentLng);
+      addUserMarker(currentLat, currentLng);
+      fetchLibraries(currentLat, currentLng);
+    },
+    (err) => {
+      let msg = '位置情報の取得に失敗しました';
+      if (err.code === 1) msg = '位置情報の使用が拒否されました。下の手動入力をお試しください。';
+      else if (err.code === 2) msg = '位置情報を取得できませんでした。手動入力をお試しください。';
+      else if (err.code === 3) msg = '位置情報の取得がタイムアウトしました。手動入力をお試しください。';
+      showLocationError(msg);
+      document.getElementById('manual-input').style.display = 'block';
+      btn.disabled = false;
+      btn.innerHTML = '<span>現在地を取得</span>';
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+function showLocationError(msg) {
+  document.getElementById('location-info').innerHTML =
+    `<span style="color:#c62828; font-size:0.8rem;">${msg}</span>`;
+}
+
+// ========================
+// 住所から緯度経度を取得（Nominatim）
+// ========================
+function searchByAddress() {
+  const query = document.getElementById('address-input').value.trim();
+  if (!query) return;
+
+  const statusEl = document.getElementById('address-status');
+  statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>検索中...</div>';
+
+  fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&accept-language=ja`, {
+    headers: { 'Accept-Language': 'ja' }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (!data || data.length === 0) {
+        statusEl.innerHTML = '<div class="status-msg error">場所が見つかりませんでした</div>';
+        return;
+      }
+      const lat = parseFloat(data[0].lat);
+      const lng = parseFloat(data[0].lon);
+      const name = data[0].display_name.split(',')[0];
+      statusEl.innerHTML = '';
+      document.getElementById('location-info').textContent = `📍 ${name}`;
+      currentLat = lat;
+      currentLng = lng;
+      initMap(lat, lng);
+      addUserMarker(lat, lng);
+      fetchLibraries(lat, lng);
+    })
+    .catch(() => {
+      statusEl.innerHTML = '<div class="status-msg error">住所の検索に失敗しました</div>';
+    });
+}
+
+// ========================
+// 現在地マーカー
+// ========================
+function addUserMarker(lat, lng) {
+  if (userMarker) userMarker.remove();
+  const icon = L.divIcon({
+    className: '',
+    html: '<div style="width:14px;height:14px;background:#1565c0;border:3px solid white;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4)"></div>',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
+  });
+  userMarker = L.marker([lat, lng], { icon }).addTo(map);
+  userMarker.bindPopup('<b>現在地</b>').openPopup();
+}
+
+// ========================
+// JSONP ヘルパー
+// ========================
+function jsonp(url, callback) {
+  const cbName = '__calil_cb_' + (++jsonpCounter);
+  const script = document.createElement('script');
+  const timeoutId = setTimeout(() => {
+    cleanup();
+    callback(new Error('タイムアウトしました'), null);
+  }, 15000);
+
+  window[cbName] = (data) => {
+    cleanup();
+    callback(null, data);
+  };
+
+  function cleanup() {
+    clearTimeout(timeoutId);
+    delete window[cbName];
+    if (script.parentNode) script.parentNode.removeChild(script);
+  }
+
+  script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName;
+  script.onerror = () => {
+    cleanup();
+    callback(new Error('リクエストに失敗しました'), null);
+  };
+  document.head.appendChild(script);
+}
+
+// ========================
+// 図書館データ取得
+// ========================
+function fetchLibraries(lat, lng) {
+  const statusEl = document.getElementById('library-status');
+  const listEl = document.getElementById('library-list');
+  statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>図書館を検索中...</div>';
+  listEl.innerHTML = '';
+
+  const url = `https://api.calil.jp/library?appkey=${APPKEY}&geocode=${lng},${lat}&limit=20&format=json`;
+
+  jsonp(url, (err, data) => {
+    statusEl.innerHTML = '';
+    if (err || !data) {
+      statusEl.innerHTML = `<div class="status-msg error">図書館の取得に失敗しました</div>`;
+      return;
+    }
+
+    libraries = Array.isArray(data) ? data : [];
+    if (libraries.length === 0) {
+      listEl.innerHTML = '<div class="empty-msg">近くに図書館が見つかりませんでした</div>';
+      return;
+    }
+
+    renderLibraries();
+    renderLibraryMarkers();
+  });
+}
+
+// ========================
+// カテゴリー表示名
+// ========================
+const CATEGORY_LABEL = {
+  SMALL: '小規模図書館', MEDIUM: '図書館', LARGE: '大型図書館',
+  UNIV: '大学図書館', SPECIAL: '専門図書館', BM: '移動図書館'
+};
+
+// ========================
+// 図書館リスト描画
+// ========================
+function renderLibraries() {
+  const listEl = document.getElementById('library-list');
+  listEl.innerHTML = '';
+  libraries.forEach((lib, i) => {
+    const item = document.createElement('div');
+    item.className = 'library-item';
+    item.id = `lib-item-${i}`;
+    item.innerHTML = `
+      <div class="library-name">${escHtml(lib.formal || lib.short || '不明')}</div>
+      <div class="library-address">${escHtml(lib.address || '')}</div>
+      <span class="library-category">${CATEGORY_LABEL[lib.category] || lib.category || ''}</span>
+    `;
+    item.onclick = () => focusLibrary(i);
+    listEl.appendChild(item);
+  });
+}
+
+// ========================
+// 図書館マーカー描画
+// ========================
+function renderLibraryMarkers() {
+  currentMarkers.forEach(m => m.remove());
+  currentMarkers = [];
+
+  const bookIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:28px;height:28px;background:#2c5f2e;border:2px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.35)">📚</div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+
+  libraries.forEach((lib, i) => {
+    if (!lib.geocode) return;
+    const [lngStr, latStr] = lib.geocode.split(',');
+    const latF = parseFloat(latStr);
+    const lngF = parseFloat(lngStr);
+    if (isNaN(latF) || isNaN(lngF)) return;
+
+    const marker = L.marker([latF, lngF], { icon: bookIcon }).addTo(map);
+    marker.bindPopup(`
+      <b>${escHtml(lib.formal || lib.short || '')}</b><br>
+      <small>${escHtml(lib.address || '')}</small>
+    `);
+    marker.on('click', () => focusLibrary(i));
+    currentMarkers.push(marker);
+  });
+}
+
+// ========================
+// 図書館フォーカス
+// ========================
+function focusLibrary(i) {
+  document.querySelectorAll('.library-item').forEach(el => el.classList.remove('active'));
+  const item = document.getElementById(`lib-item-${i}`);
+  if (item) {
+    item.classList.add('active');
+    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  const lib = libraries[i];
+  if (lib && lib.geocode && map) {
+    const [lngStr, latStr] = lib.geocode.split(',');
+    const latF = parseFloat(latStr);
+    const lngF = parseFloat(lngStr);
+    if (!isNaN(latF) && !isNaN(lngF)) {
+      map.setView([latF, lngF], 15);
+      if (currentMarkers[i]) currentMarkers[i].openPopup();
+    }
+  }
+}
+
+// ========================
+// 本の検索
+// ========================
+function searchBook() {
+  const query = document.getElementById('book-query').value.trim();
+  if (!query) return;
+
+  const statusEl = document.getElementById('book-search-status');
+  const candidatesEl = document.getElementById('book-candidates');
+  const resultEl = document.getElementById('book-result');
+  candidatesEl.innerHTML = '';
+  resultEl.innerHTML = '';
+
+  if (libraries.length === 0) {
+    statusEl.innerHTML = '<div class="status-msg error">先に現在地を取得して図書館を表示してください</div>';
+    return;
+  }
+
+  // ISBNっぽい場合は直接検索
+  const isbnPattern = /^[0-9]{10,13}$/;
+  if (isbnPattern.test(query.replace(/-/g, ''))) {
+    const isbn = query.replace(/-/g, '');
+    statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>蔵書を確認中...</div>';
+    checkAvailability({ isbn13: isbn, title: isbn, author: '' });
+    return;
+  }
+
+  // タイトル検索 → OpenBD
+  statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>本を検索中...</div>';
+  fetchBooksFromOpenBD(query);
+}
+
+// ========================
+// OpenBD でタイトル検索
+// ========================
+function fetchBooksFromOpenBD(title) {
+  const statusEl = document.getElementById('book-search-status');
+  const candidatesEl = document.getElementById('book-candidates');
+
+  fetch(`https://api.openbd.jp/v1/search?title=${encodeURIComponent(title)}&limit=10`)
+    .then(r => r.json())
+    .then(data => {
+      statusEl.innerHTML = '';
+      if (!data || data.length === 0) {
+        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした</div>';
+        return;
+      }
+
+      if (data.length === 1) {
+        const book = extractBookInfo(data[0]);
+        if (book) checkAvailability(book);
+        return;
+      }
+
+      // 候補一覧を表示
+      statusEl.innerHTML = `<div class="status-msg info">${data.length}件見つかりました。確認したい本を選んでください</div>`;
+      const container = document.createElement('div');
+      container.className = 'book-candidates';
+
+      data.slice(0, 8).forEach(item => {
+        const book = extractBookInfo(item);
+        if (!book) return;
+        const el = document.createElement('div');
+        el.className = 'book-candidate-item';
+        el.innerHTML = `
+          <div class="candidate-title">${escHtml(book.title)}</div>
+          <div class="candidate-meta">${escHtml(book.author)} / ISBN: ${book.isbn13}</div>
+        `;
+        el.onclick = () => {
+          candidatesEl.innerHTML = '';
+          statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>蔵書を確認中...</div>';
+          checkAvailability(book);
+        };
+        container.appendChild(el);
+      });
+      candidatesEl.appendChild(container);
+    })
+    .catch(() => {
+      statusEl.innerHTML = '<div class="status-msg error">本の検索に失敗しました</div>';
+    });
+}
+
+function extractBookInfo(item) {
+  if (!item || !item.summary) return null;
+  return {
+    isbn13: item.summary.isbn || '',
+    title: item.summary.title || '不明',
+    author: item.summary.author || ''
+  };
+}
+
+// ========================
+// CALIL Check API（蔵書確認）
+// ========================
+function checkAvailability(book) {
+  if (pollTimer) clearTimeout(pollTimer);
+
+  const systemIds = [...new Set(libraries.map(l => l.systemid).filter(Boolean))].slice(0, 5);
+  if (systemIds.length === 0) {
+    document.getElementById('book-search-status').innerHTML =
+      '<div class="status-msg error">図書館のシステムIDが取得できませんでした</div>';
+    return;
+  }
+
+  const resultEl = document.getElementById('book-result');
+  resultEl.innerHTML = `
+    <div class="book-result">
+      <div class="book-title">${escHtml(book.title)}</div>
+      ${book.author ? `<div class="book-author">${escHtml(book.author)}</div>` : ''}
+      <div class="book-isbn">ISBN: ${book.isbn13}</div>
+      <div id="avail-status" class="status-msg loading" style="margin-top:8px"><div class="spinner"></div>蔵書を確認中...</div>
+      <div class="availability-list" id="availability-list"></div>
+    </div>
+  `;
+
+  const url = `https://api.calil.jp/check?appkey=${APPKEY}&isbn=${book.isbn13}&systemid=${systemIds.join(',')}&format=json`;
+  doPoll(url, book, systemIds, null);
+}
+
+function doPoll(baseUrl, book, systemIds, session) {
+  const url = session ? `${baseUrl}&session=${session}` : baseUrl;
+
+  jsonp(url, (err, data) => {
+    const statusEl = document.getElementById('avail-status');
+    if (err || !data) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:#c62828">取得に失敗しました</span>';
+      return;
+    }
+
+    renderAvailability(data, systemIds);
+
+    if (data.continue === 1) {
+      pollTimer = setTimeout(() => {
+        doPoll(baseUrl, book, systemIds, data.session);
+      }, 2000);
+    } else {
+      if (statusEl) statusEl.style.display = 'none';
+      document.getElementById('book-search-status').innerHTML = '';
+    }
+  });
+}
+
+// ========================
+// 貸出状況の描画
+// ========================
+function renderAvailability(data, systemIds) {
+  const listEl = document.getElementById('availability-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  const books = data.books;
+  if (!books) return;
+
+  // 最初のISBNのデータを取得
+  const isbnKey = Object.keys(books)[0];
+  if (!isbnKey) return;
+  const systemData = books[isbnKey];
+
+  systemIds.forEach(sid => {
+    const info = systemData[sid];
+    if (!info) return;
+
+    // 図書館名を取得
+    const lib = libraries.find(l => l.systemid === sid);
+    const libName = lib ? (lib.short || lib.formal || sid) : sid;
+
+    const statusText = info.libkey
+      ? Object.values(info.libkey).join('、')
+      : (info.status === 'OK' ? '確認済み' : '未確認');
+
+    const { cls, label } = getStatusDisplay(statusText, info.status);
+
+    const item = document.createElement('div');
+    item.className = 'availability-item';
+    item.innerHTML = `
+      <span class="avail-library">${escHtml(libName)}</span>
+      <span class="avail-status ${cls}">${escHtml(label)}</span>
+    `;
+    listEl.appendChild(item);
+  });
+
+  if (listEl.children.length === 0) {
+    listEl.innerHTML = '<div class="empty-msg">この図書館システムには蔵書情報がありません</div>';
+  }
+}
+
+function getStatusDisplay(statusText, apiStatus) {
+  if (apiStatus === 'Error' || apiStatus === 'Pending') {
+    return { cls: 'status-none', label: '確認中...' };
+  }
+  if (!statusText || statusText === '蔵書なし') {
+    return { cls: 'status-none', label: '蔵書なし' };
+  }
+  const text = statusText;
+  if (text.includes('貸出可')) return { cls: 'status-ok', label: '貸出可' };
+  if (text.includes('貸出中')) return { cls: 'status-out', label: '貸出中' };
+  if (text.includes('予約中')) return { cls: 'status-out', label: '予約中' };
+  if (text.includes('館内のみ')) return { cls: 'status-other', label: '館内のみ' };
+  if (text.includes('準備中')) return { cls: 'status-other', label: '準備中' };
+  return { cls: 'status-other', label: text };
+}
+
+// ========================
+// XSSエスケープ
+// ========================
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
