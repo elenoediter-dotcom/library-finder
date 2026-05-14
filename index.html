@@ -419,6 +419,64 @@
 
     /* Leaflet Routing Machine のデフォルトUIを非表示 */
     .leaflet-routing-container { display: none !important; }
+
+    /* ===== 検索履歴 ===== */
+    .history-wrap {
+      margin-top: 6px;
+    }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      color: #999;
+      margin-bottom: 4px;
+    }
+    .history-clear {
+      background: none;
+      border: none;
+      font-size: 0.72rem;
+      color: #bbb;
+      cursor: pointer;
+      padding: 0;
+    }
+    .history-clear:hover { color: #c62828; }
+    .history-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .history-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      background: #f5f5f5;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      color: #444;
+      cursor: pointer;
+      transition: all 0.15s;
+      max-width: 160px;
+    }
+    .history-tag:hover {
+      background: #e8f5e9;
+      border-color: #a5d6a7;
+      color: #2c5f2e;
+    }
+    .history-tag span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-del {
+      flex-shrink: 0;
+      color: #ccc;
+      font-size: 0.8rem;
+      line-height: 1;
+    }
+    .history-del:hover { color: #c62828; }
   </style>
 </head>
 <body>
@@ -493,6 +551,7 @@
           />
           <button class="btn btn-primary" onclick="searchBook()">検索</button>
         </div>
+        <div id="book-history"></div>
         <div id="book-search-status"></div>
         <div id="book-candidates"></div>
         <div id="book-result"></div>
@@ -946,6 +1005,71 @@ function getTurnIcon(type) {
 }
 
 // ========================
+// 検索履歴（localStorage）
+// ========================
+const HISTORY_KEY = 'library_finder_history';
+const HISTORY_MAX = 10;
+
+function getHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function addHistory(query) {
+  const list = getHistory().filter(q => q !== query);
+  list.unshift(query);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+  renderHistory();
+}
+
+function removeHistory(query) {
+  const list = getHistory().filter(q => q !== query);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  renderHistory();
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('book-history');
+  if (!el) return;
+  const list = getHistory();
+  if (list.length === 0) { el.innerHTML = ''; return; }
+
+  const tagsHtml = list.map(q => `
+    <span class="history-tag" onclick="searchFromHistory('${escAttr(q)}')">
+      <span>🕐 ${escHtml(q)}</span>
+      <span class="history-del" onclick="event.stopPropagation(); removeHistory('${escAttr(q)}')">✕</span>
+    </span>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="history-wrap">
+      <div class="history-header">
+        <span>検索履歴</span>
+        <button class="history-clear" onclick="clearHistory()">すべて消去</button>
+      </div>
+      <div class="history-list">${tagsHtml}</div>
+    </div>
+  `;
+}
+
+function searchFromHistory(query) {
+  document.getElementById('book-query').value = query;
+  searchBook();
+}
+
+function escAttr(str) {
+  return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// ページ読み込み時に履歴を描画
+document.addEventListener('DOMContentLoaded', renderHistory);
+
+// ========================
 // 本の検索
 // ========================
 function searchBook() {
@@ -962,6 +1086,9 @@ function searchBook() {
     statusEl.innerHTML = '<div class="status-msg error">先に現在地を取得して図書館を表示してください</div>';
     return;
   }
+
+  // 履歴に追加
+  addHistory(query);
 
   // ISBNっぽい場合は直接検索
   const isbnPattern = /^[0-9]{10,13}$/;
