@@ -326,14 +326,19 @@
     .candidate-title { font-weight: 600; color: #222; }
     .candidate-meta { font-size: 0.72rem; color: #888; margin-top: 2px; }
 
-    /* ===== 経路ボタン ===== */
+    /* ===== 経路ボタン群 ===== */
+    .route-btns {
+      display: flex;
+      gap: 5px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
     .btn-route {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      margin-top: 6px;
-      padding: 4px 10px;
-      font-size: 0.73rem;
+      gap: 3px;
+      padding: 4px 9px;
+      font-size: 0.72rem;
       font-weight: 600;
       border: 1px solid #1565c0;
       border-radius: 12px;
@@ -342,8 +347,16 @@
       cursor: pointer;
       transition: all 0.15s;
     }
-    .btn-route:hover { background: #1565c0; color: white; }
+    .btn-route:hover { background: #bbdefb; }
     .btn-route.active { background: #1565c0; color: white; }
+    .btn-route.transit { border-color: #6a1b9a; background: #f3e5f5; color: #6a1b9a; }
+    .btn-route.transit:hover { background: #e1bee7; }
+    .btn-route.clear-route {
+      border-color: #999;
+      background: #f5f5f5;
+      color: #666;
+    }
+    .btn-route.clear-route:hover { background: #e0e0e0; }
 
     /* ===== 経路情報パネル ===== */
     .route-info {
@@ -669,17 +682,18 @@ function renderLibraries() {
     item.id = `lib-item-${i}`;
 
     const hasGeocode = !!lib.geocode;
-    const routeBtnHtml = hasGeocode
-      ? `<button class="btn-route" id="route-btn-${i}" onclick="event.stopPropagation(); toggleRoute(${i})">🗺 経路を表示</button>`
-      : '';
+    const routeBtnsHtml = hasGeocode ? `
+      <div class="route-btns" id="route-btns-${i}">
+        <button class="btn-route" id="route-btn-${i}-foot"  onclick="event.stopPropagation(); toggleRoute(${i},'foot')">🚶 徒歩</button>
+        <button class="btn-route" id="route-btn-${i}-car"   onclick="event.stopPropagation(); toggleRoute(${i},'car')">🚗 車</button>
+        <button class="btn-route transit" onclick="event.stopPropagation(); openTransit(${i})">🚃 電車</button>
+      </div>` : '';
 
     item.innerHTML = `
       <div class="library-name">${escHtml(lib.formal || lib.short || '不明')}</div>
       <div class="library-address">${escHtml(lib.address || '')}</div>
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span class="library-category">${CATEGORY_LABEL[lib.category] || lib.category || ''}</span>
-        ${routeBtnHtml}
-      </div>
+      <span class="library-category">${CATEGORY_LABEL[lib.category] || lib.category || ''}</span>
+      ${routeBtnsHtml}
       <div class="route-info" id="route-info-${i}" style="display:none;"></div>
     `;
     item.onclick = () => focusLibrary(i);
@@ -745,10 +759,16 @@ function focusLibrary(i) {
 // ========================
 let routingControl = null;
 let activeRouteIndex = null;
+let activeRouteMode = null;
 
-function toggleRoute(i) {
+const ROUTE_MODE = {
+  foot: { osrm: 'foot',    icon: '🚶', label: '徒歩', color: '#1565c0' },
+  car:  { osrm: 'driving', icon: '🚗', label: '車',   color: '#e65100' }
+};
+
+function toggleRoute(i, mode) {
   // 同じボタンを再クリック → 経路を消す
-  if (activeRouteIndex === i) {
+  if (activeRouteIndex === i && activeRouteMode === mode) {
     clearRoute();
     return;
   }
@@ -760,44 +780,41 @@ function toggleRoute(i) {
 
   const lib = libraries[i];
   if (!lib || !lib.geocode) return;
-
   const [lngStr, latStr] = lib.geocode.split(',');
   const destLat = parseFloat(latStr);
   const destLng = parseFloat(lngStr);
   if (isNaN(destLat) || isNaN(destLng)) return;
 
-  // 前の経路を消す
   clearRoute(false);
-
-  // ボタンをアクティブに
   activeRouteIndex = i;
-  const btn = document.getElementById(`route-btn-${i}`);
-  if (btn) { btn.textContent = '✕ 経路を消す'; btn.classList.add('active'); }
+  activeRouteMode = mode;
 
-  // 地図をフィット
+  // ボタン状態リセット → アクティブに
+  ['foot','car'].forEach(m => {
+    const b = document.getElementById(`route-btn-${i}-${m}`);
+    if (b) b.classList.remove('active');
+  });
+  const activeBtn = document.getElementById(`route-btn-${i}-${mode}`);
+  if (activeBtn) activeBtn.classList.add('active');
+
   focusLibrary(i);
 
-  // Leaflet Routing Machine でルート描画
+  const cfg = ROUTE_MODE[mode];
   routingControl = L.Routing.control({
-    waypoints: [
-      L.latLng(currentLat, currentLng),
-      L.latLng(destLat, destLng)
-    ],
+    waypoints: [L.latLng(currentLat, currentLng), L.latLng(destLat, destLng)],
     router: L.Routing.osrmv1({
       serviceUrl: 'https://router.project-osrm.org/route/v1',
-      profile: 'foot'  // 徒歩
+      profile: cfg.osrm
     }),
-    lineOptions: {
-      styles: [{ color: '#1565c0', weight: 5, opacity: 0.8 }]
-    },
-    createMarker: () => null,  // 既存マーカーを使うので新規作成しない
+    lineOptions: { styles: [{ color: cfg.color, weight: 5, opacity: 0.85 }] },
+    createMarker: () => null,
     addWaypoints: false,
     draggableWaypoints: false,
     fitSelectedRoutes: true,
     show: false
   }).addTo(map);
 
-  // ルート計算完了時に情報を表示
+  // 結果表示
   routingControl.on('routesfound', (e) => {
     const route = e.routes[0];
     const distKm = (route.summary.totalDistance / 1000).toFixed(1);
@@ -805,21 +822,21 @@ function toggleRoute(i) {
     const infoEl = document.getElementById(`route-info-${i}`);
     if (!infoEl) return;
 
-    // ターンバイターン案内
-    const steps = route.instructions || [];
-    const stepsHtml = steps.slice(0, 15).map(s => {
+    const steps = (route.instructions || []).slice(0, 15).map(s => {
       const icon = getTurnIcon(s.type);
-      const distStr = s.distance > 0 ? ` (${s.distance < 1000 ? s.distance + 'm' : (s.distance/1000).toFixed(1) + 'km'})` : '';
+      const distStr = s.distance > 0
+        ? ` (${s.distance < 1000 ? s.distance + 'm' : (s.distance/1000).toFixed(1) + 'km'})`
+        : '';
       return `<div class="route-step"><span class="step-icon">${icon}</span><span>${escHtml(s.text)}${distStr}</span></div>`;
     }).join('');
 
     infoEl.style.display = 'block';
     infoEl.innerHTML = `
       <div class="route-stats">
-        <span>🚶 徒歩 約${mins}分</span>
+        <span>${cfg.icon} ${cfg.label} 約${mins}分</span>
         <span>📏 ${distKm} km</span>
       </div>
-      <div class="route-steps">${stepsHtml}</div>
+      <div class="route-steps">${steps}</div>
     `;
     infoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
@@ -833,18 +850,28 @@ function toggleRoute(i) {
   });
 }
 
-function clearRoute(resetButton = true) {
-  if (routingControl) {
-    map.removeControl(routingControl);
-    routingControl = null;
-  }
-  if (resetButton && activeRouteIndex !== null) {
-    const btn = document.getElementById(`route-btn-${activeRouteIndex}`);
-    if (btn) { btn.textContent = '🗺 経路を表示'; btn.classList.remove('active'); }
+// 電車：Google Maps で開く
+function openTransit(i) {
+  if (!currentLat || !currentLng) { alert('先に現在地を取得してください'); return; }
+  const lib = libraries[i];
+  if (!lib || !lib.geocode) return;
+  const [lngStr, latStr] = lib.geocode.split(',');
+  const url = `https://www.google.com/maps/dir/?api=1&origin=${currentLat},${currentLng}&destination=${latStr},${lngStr}&travelmode=transit`;
+  window.open(url, '_blank');
+}
+
+function clearRoute(resetButtons = true) {
+  if (routingControl) { map.removeControl(routingControl); routingControl = null; }
+  if (resetButtons && activeRouteIndex !== null) {
+    ['foot','car'].forEach(m => {
+      const b = document.getElementById(`route-btn-${activeRouteIndex}-${m}`);
+      if (b) b.classList.remove('active');
+    });
     const infoEl = document.getElementById(`route-info-${activeRouteIndex}`);
     if (infoEl) infoEl.style.display = 'none';
   }
   activeRouteIndex = null;
+  activeRouteMode = null;
 }
 
 function getTurnIcon(type) {
