@@ -699,34 +699,38 @@ function searchBook() {
     return;
   }
 
-  // タイトル検索 → Google Books API
+  // タイトル検索 → /api/search（サーバーサイド）
   statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>本を検索中...</div>';
-  fetchBooksFromGoogle(query);
+  fetchBooksFromAPI(query);
 }
 
 // ========================
-// Google Books API でタイトル検索
+// サーバーサイドAPI経由で書籍検索
 // ========================
-function fetchBooksFromGoogle(title) {
+function fetchBooksFromAPI(title) {
   const statusEl = document.getElementById('book-search-status');
   const candidatesEl = document.getElementById('book-candidates');
 
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title)}&maxResults=20&printType=books`;
-
-  fetch(url)
+  fetch(`/api/search?title=${encodeURIComponent(title)}`)
     .then(r => r.json())
     .then(data => {
       statusEl.innerHTML = '';
-      const items = data.items || [];
-      const books = items.map(extractBookInfo).filter(b => b && b.isbn13);
+
+      // エラーレスポンスの場合
+      if (data.error) {
+        statusEl.innerHTML = '<div class="status-msg error">本の検索に失敗しました</div>';
+        return;
+      }
+
+      const books = Array.isArray(data) ? data : [];
 
       if (books.length === 0) {
-        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした。別のキーワードやISBNで検索してみてください</div>';
+        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした。別のキーワードで試してみてください</div>';
         return;
       }
 
       if (books.length === 1) {
-        checkAvailability(books[0]);
+        checkAvailability({ isbn13: books[0].isbn, title: books[0].title, author: books[0].author });
         return;
       }
 
@@ -740,12 +744,12 @@ function fetchBooksFromGoogle(title) {
         el.className = 'book-candidate-item';
         el.innerHTML = `
           <div class="candidate-title">${escHtml(book.title)}</div>
-          <div class="candidate-meta">${escHtml(book.author)} / ISBN: ${book.isbn13}</div>
+          <div class="candidate-meta">${escHtml(book.author)}${book.isbn ? ' / ISBN: ' + book.isbn : ''}</div>
         `;
         el.onclick = () => {
           candidatesEl.innerHTML = '';
           statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>蔵書を確認中...</div>';
-          checkAvailability(book);
+          checkAvailability({ isbn13: book.isbn, title: book.title, author: book.author });
         };
         container.appendChild(el);
       });
@@ -754,21 +758,6 @@ function fetchBooksFromGoogle(title) {
     .catch(() => {
       statusEl.innerHTML = '<div class="status-msg error">本の検索に失敗しました</div>';
     });
-}
-
-function extractBookInfo(item) {
-  if (!item || !item.volumeInfo) return null;
-  const info = item.volumeInfo;
-  const identifiers = info.industryIdentifiers || [];
-  const isbn13obj = identifiers.find(id => id.type === 'ISBN_13');
-  const isbn10obj = identifiers.find(id => id.type === 'ISBN_10');
-  const isbn = (isbn13obj || isbn10obj || {}).identifier || '';
-  if (!isbn) return null;
-  return {
-    isbn13: isbn,
-    title: info.title || '不明',
-    author: (info.authors || []).join('、')
-  };
 }
 
 // ========================
