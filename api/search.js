@@ -1,47 +1,34 @@
 // Vercel Serverless Function
-// 国立国会図書館（NDL）APIを使って日本の本をタイトル検索し、ISBNを返す
+// 国立国会図書館（NDL）APIで日本の本をタイトル検索してISBNを返す
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
   const title = (req.query.title || '').trim();
-  if (!title) {
-    return res.json([]);
-  }
+  if (!title) return res.json([]);
 
   try {
-    // 国立国会図書館サーチAPI（図書のみ: mediatype=1）
-    const ndlUrl = `https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeURIComponent(title)}&cnt=30&mediatype=1`;
-    const ndlRes = await fetch(ndlUrl, {
-      headers: { 'Accept': 'application/xml' }
-    });
+    // mediatype不要：category=図書 をXMLパース時にフィルタする
+    const ndlUrl = `https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeURIComponent(title)}&cnt=50`;
+    const ndlRes = await fetch(ndlUrl);
+    if (!ndlRes.ok) throw new Error(`NDL ${ndlRes.status}`);
 
-    if (!ndlRes.ok) {
-      throw new Error(`NDL API error: ${ndlRes.status}`);
-    }
-
-    const xmlText = await ndlRes.text();
-    const books = parseNDLXml(xmlText);
-
-    // ISBNがある本に絞る
+    const xml = await ndlRes.text();
+    const books = parseNDLXml(xml);
     const withIsbn = books.filter(b => b.isbn);
 
-    // ISBNなしでも件数が少なければGoogle Booksで補完
-    if (withIsbn.length === 0) {
-      const googleBooks = await searchGoogleBooks(title);
-      return res.json(googleBooks);
-    }
+    if (withIsbn.length > 0) return res.json(withIsbn.slice(0, 10));
 
-    return res.json(withIsbn.slice(0, 10));
+    // NDLでISBNが取れなければ Google Books にフォールバック
+    const gbBooks = await searchGoogleBooks(title);
+    return res.json(gbBooks);
 
   } catch (e) {
-    // NDLが失敗したらGoogle Booksにフォールバック
     try {
-      const googleBooks = await searchGoogleBooks(title);
-      return res.json(googleBooks);
-    } catch (e2) {
-      return res.status(500).json({ error: e2.message });
+      return res.json(await searchGoogleBooks(title));
+    } catch {
+      return res.status(500).json([]);
     }
   }
 }
@@ -52,44 +39,36 @@ export default async function handler(req, res) {
 function parseNDLXml(xml) {
   const books = [];
 
-  // <item>...</item> を全部抽出
+  // <item>〜</item> を一つずつ処理
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-  let itemMatch;
+  let m;
+  while ((m = itemRegex.exec(xml)) !== null) {
+    const block = m[1];
 
-  while ((itemMatch = itemRegex.exec(xml)) !== null) {
-    const item = itemMatch[1];
+    // 図書カテゴリのみ（記事・新聞を除外）
+    if (!block.includes('<category>図書</category>')) continue;
 
-    // タイトル
-    const titleMatch = item.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/);
-    const rawTitle = titleMatch ? titleMatch[1].trim() : '';
+    // タイトル（<title> の最初の出現）
+    const titleM = block.match(/<title>([^<]+)<\/title>/);
+    if (!titleM) continue;
+    const title = titleM[1].trim();
 
-    // 著者
-    const creatorMatch = item.match(/<dc:creator>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/dc:creator>/);
-    const author = creatorMatch ? creatorMatch[1].trim() : '';
+    // 著者（最初の dc:creator）
+    const creatorM = block.match(/<dc:creator>([^<]+)<\/dc:creator>/);
+    const author = creatorM ? creatorM[1].replace(/,\s*\d{4}-(\d{4})?/g, '').trim() : '';
 
-    // ISBN（xsi:type="dcndl:ISBN" の dc:identifier を探す）
+    // ISBN抽出：dcndl:ISBN 属性を持つ dc:identifier
+    // 例: <dc:identifier xsi:type="dcndl:ISBN">978-4-10-101005-2</dc:identifier>
     let isbn = '';
-    const identifierRegex = /<dc:identifier[^>]*>([\s\S]*?)<\/dc:identifier>/g;
-    let idMatch;
-    while ((idMatch = identifierRegex.exec(item)) !== null) {
-      const surrounding = item.substring(idMatch.index - 60, idMatch.index + idMatch[0].length);
-      if (surrounding.includes('ISBN')) {
-        const candidate = idMatch[1].replace(/-/g, '').trim();
-        // ISBN-13 を優先
-        if (/^978\d{10}$/.test(candidate)) {
-          isbn = candidate;
-          break;
-        }
-        // ISBN-10 も受け付ける
-        if (/^\d{10}$/.test(candidate) && !isbn) {
-          isbn = candidate;
-        }
-      }
+    const idRegex = /<dc:identifier[^>]*xsi:type="dcndl:ISBN[^"]*"[^>]*>([^<]+)<\/dc:identifier>/g;
+    let idM;
+    while ((idM = idRegex.exec(block)) !== null) {
+      const raw = idM[1].replace(/-/g, '').trim();
+      if (/^978\d{10}$/.test(raw)) { isbn = raw; break; }        // ISBN-13 優先
+      if (/^\d{9}[\dX]$/.test(raw) && !isbn) isbn = raw;        // ISBN-10 を保持
     }
 
-    if (rawTitle) {
-      books.push({ title: rawTitle, author, isbn });
-    }
+    books.push({ title, author, isbn });
   }
 
   return books;
@@ -100,21 +79,12 @@ function parseNDLXml(xml) {
 // ========================
 async function searchGoogleBooks(title) {
   const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(title)}&maxResults=20&printType=books`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const items = data.items || [];
-
-  return items.map(item => {
+  const data = await fetch(url).then(r => r.json());
+  return (data.items || []).map(item => {
     const info = item.volumeInfo || {};
     const ids = info.industryIdentifiers || [];
-    const isbn13 = ids.find(i => i.type === 'ISBN_13')?.identifier;
-    const isbn10 = ids.find(i => i.type === 'ISBN_10')?.identifier;
-    const isbn = isbn13 || isbn10 || '';
+    const isbn = (ids.find(i => i.type === 'ISBN_13') || ids.find(i => i.type === 'ISBN_10') || {}).identifier || '';
     if (!isbn) return null;
-    return {
-      title: info.title || '',
-      author: (info.authors || []).join('、'),
-      isbn
-    };
+    return { title: info.title || '', author: (info.authors || []).join('、'), isbn };
   }).filter(Boolean).slice(0, 10);
 }
