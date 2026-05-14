@@ -229,14 +229,39 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 5px 8px;
+      padding: 6px 8px;
       background: white;
       border-radius: 5px;
       border: 1px solid #eee;
       font-size: 0.78rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .availability-item:hover {
+      border-color: #2c5f2e;
+      background: #f1f8e9;
+    }
+    .availability-item.clickable-ok:hover {
+      border-color: #1b5e20;
+      background: #e8f5e9;
+      box-shadow: 0 1px 4px rgba(27,94,32,0.15);
     }
 
-    .avail-library { color: #444; font-weight: 500; }
+    .avail-library {
+      color: #444;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .avail-library .map-hint {
+      font-size: 0.68rem;
+      color: #999;
+      font-weight: 400;
+    }
+    .availability-item:hover .map-hint {
+      color: #2c5f2e;
+    }
 
     .avail-status {
       font-weight: 700;
@@ -1044,8 +1069,9 @@ function renderAvailability(data, systemIds) {
     const info = systemData[sid];
     if (!info) return;
 
-    // 図書館名を取得
-    const lib = libraries.find(l => l.systemid === sid);
+    // 図書館を特定
+    const libIndex = libraries.findIndex(l => l.systemid === sid);
+    const lib = libIndex >= 0 ? libraries[libIndex] : null;
     const libName = lib ? (lib.short || lib.formal || sid) : sid;
 
     const statusText = info.libkey
@@ -1054,12 +1080,29 @@ function renderAvailability(data, systemIds) {
 
     const { cls, label } = getStatusDisplay(statusText, info.status);
 
+    // クリック可能かどうか（図書館の位置情報がある場合）
+    const isClickable = libIndex >= 0;
+    const mapHint = isClickable ? '<span class="map-hint">📍 地図で見る</span>' : '';
+
     const item = document.createElement('div');
-    item.className = 'availability-item';
+    item.className = `availability-item${isClickable ? ' clickable-ok' : ''}`;
     item.innerHTML = `
-      <span class="avail-library">${escHtml(libName)}</span>
+      <span class="avail-library">${escHtml(libName)}${mapHint}</span>
       <span class="avail-status ${cls}">${escHtml(label)}</span>
     `;
+
+    if (isClickable) {
+      item.onclick = () => {
+        // 地図・リストにフォーカス
+        focusLibrary(libIndex);
+        // サイドバーの図書館カードまでスクロール
+        const card = document.getElementById(`lib-item-${libIndex}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      };
+    }
+
     listEl.appendChild(item);
   });
 
