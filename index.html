@@ -699,41 +699,43 @@ function searchBook() {
     return;
   }
 
-  // タイトル検索 → OpenBD
+  // タイトル検索 → Google Books API
   statusEl.innerHTML = '<div class="status-msg loading"><div class="spinner"></div>本を検索中...</div>';
-  fetchBooksFromOpenBD(query);
+  fetchBooksFromGoogle(query);
 }
 
 // ========================
-// OpenBD でタイトル検索
+// Google Books API でタイトル検索
 // ========================
-function fetchBooksFromOpenBD(title) {
+function fetchBooksFromGoogle(title) {
   const statusEl = document.getElementById('book-search-status');
   const candidatesEl = document.getElementById('book-candidates');
 
-  fetch(`https://api.openbd.jp/v1/search?title=${encodeURIComponent(title)}&limit=10`)
+  const url = `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title)}&langRestrict=ja&maxResults=10&printType=books`;
+
+  fetch(url)
     .then(r => r.json())
     .then(data => {
       statusEl.innerHTML = '';
-      if (!data || data.length === 0) {
-        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした</div>';
+      const items = data.items || [];
+      const books = items.map(extractBookInfo).filter(b => b && b.isbn13);
+
+      if (books.length === 0) {
+        statusEl.innerHTML = '<div class="status-msg error">本が見つかりませんでした（ISBNが取得できませんでした）</div>';
         return;
       }
 
-      if (data.length === 1) {
-        const book = extractBookInfo(data[0]);
-        if (book) checkAvailability(book);
+      if (books.length === 1) {
+        checkAvailability(books[0]);
         return;
       }
 
       // 候補一覧を表示
-      statusEl.innerHTML = `<div class="status-msg info">${data.length}件見つかりました。確認したい本を選んでください</div>`;
+      statusEl.innerHTML = `<div class="status-msg info">${books.length}件見つかりました。確認したい本を選んでください</div>`;
       const container = document.createElement('div');
       container.className = 'book-candidates';
 
-      data.slice(0, 8).forEach(item => {
-        const book = extractBookInfo(item);
-        if (!book) return;
+      books.slice(0, 8).forEach(book => {
         const el = document.createElement('div');
         el.className = 'book-candidate-item';
         el.innerHTML = `
@@ -755,11 +757,17 @@ function fetchBooksFromOpenBD(title) {
 }
 
 function extractBookInfo(item) {
-  if (!item || !item.summary) return null;
+  if (!item || !item.volumeInfo) return null;
+  const info = item.volumeInfo;
+  const identifiers = info.industryIdentifiers || [];
+  const isbn13obj = identifiers.find(id => id.type === 'ISBN_13');
+  const isbn10obj = identifiers.find(id => id.type === 'ISBN_10');
+  const isbn = (isbn13obj || isbn10obj || {}).identifier || '';
+  if (!isbn) return null;
   return {
-    isbn13: item.summary.isbn || '',
-    title: item.summary.title || '不明',
-    author: item.summary.author || ''
+    isbn13: isbn,
+    title: info.title || '不明',
+    author: (info.authors || []).join('、')
   };
 }
 
